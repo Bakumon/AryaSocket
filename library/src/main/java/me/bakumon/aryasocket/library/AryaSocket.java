@@ -26,8 +26,7 @@ import java.util.Map;
  */
 
 public class AryaSocket {
-    private WeakReference<Context> mContext;
-    private static AryaSocket mInstance;
+
     private static final String TAG = AryaSocket.class.getSimpleName();
 
     private static final int PER_RECONNECT_INTERVAL = 1000; // 重连每次增加的时间间隔
@@ -35,10 +34,15 @@ public class AryaSocket {
 
     private static final int FRAME_QUEUE_SIZE = 5;
     private static final int CONNECT_TIMEOUT = 5000;
+
+    private WeakReference<Context> mContext;
+    private static AryaSocket mInstance;
+
     private String url = "http://dev.banyar.cn:9443/";
 
     private Status mStatus;
     private WebSocket ws;
+
     private Handler handler;
 
     private AryaSocket() {
@@ -56,6 +60,7 @@ public class AryaSocket {
     }
 
     public void init(Application application) {
+        // TODO: 17-9-5 Config 对象使用 创建者模式
         mContext = new WeakReference<>(application.getApplicationContext());
         // 应用位于前后台监听
         ForegroundCallbacks.init(application).addListener(new ForegroundCallbacks.Listener() {
@@ -164,7 +169,7 @@ public class AryaSocket {
                     handler.post(new Runnable() {
                         @Override
                         public void run() {
-                            receiver.onScanSuccess(text);
+                            receiver.disposeTextMessage(text);
                         }
                     });
                 }

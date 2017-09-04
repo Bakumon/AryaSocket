@@ -6,5 +6,5 @@ package me.bakumon.aryasocket.library;
  */
 
 public interface AryaSocketListener {
-    void onScanSuccess(String text);
+    void disposeTextMessage(String text);
 }

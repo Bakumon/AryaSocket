@@ -20,7 +20,7 @@ public class MainActivity extends AppCompatActivity implements AryaSocketListene
     }
 
     @Override
-    public void onScanSuccess(String text) {
-        Log.e(TAG, "onScanSuccess: " + text);
+    public void disposeTextMessage(String text) {
+        Log.e(TAG, "disposeTextMessage: " + text);
     }
 }
