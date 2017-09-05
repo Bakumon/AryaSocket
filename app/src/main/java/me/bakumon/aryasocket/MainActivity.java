@@ -1,7 +1,7 @@
 package me.bakumon.aryasocket;
 
-import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 
 import me.bakumon.aryasocket.library.AryaSocket;
@@ -22,5 +22,11 @@ public class MainActivity extends AppCompatActivity implements AryaSocketListene
     @Override
     public void disposeTextMessage(String text) {
         Log.e(TAG, "disposeTextMessage: " + text);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        AryaSocket.getInstance().unRegisterListener(this);
     }
 }

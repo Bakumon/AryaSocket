@@ -6,6 +6,7 @@ import android.content.IntentFilter;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.Handler;
+import android.text.TextUtils;
 import android.util.Log;
 
 import com.neovisionaries.ws.client.WebSocket;
@@ -38,12 +39,10 @@ public class AryaSocket {
     private WeakReference<Context> mContext;
     private static AryaSocket mInstance;
 
-    private String url = "http://dev.banyar.cn:9443/";
-
+    private Handler mHandler = new Handler();
     private Status mStatus;
-    private WebSocket ws;
-
-    private Handler handler;
+    private WebSocket mWebSocket;
+    private AryaConfig mAryaConfig;
 
     private AryaSocket() {
     }
@@ -59,20 +58,28 @@ public class AryaSocket {
         return mInstance;
     }
 
-    public void init(Application application) {
-        // TODO: 17-9-5 Config 对象使用 创建者模式
+    public void init(Application application, AryaConfig aryaConfig) {
         mContext = new WeakReference<>(application.getApplicationContext());
+        mAryaConfig = aryaConfig;
+        addListener(application);
+        initClient();
+    }
+
+    /**
+     * 设置监听，做一些重连的策略
+     */
+    private void addListener(Application application) {
         // 应用位于前后台监听
         ForegroundCallbacks.init(application).addListener(new ForegroundCallbacks.Listener() {
             @Override
             public void onBecameForeground() {
                 AryaSocket.getInstance().immediateReconnect();
-                Log.i(TAG, "onBecameForeground: ");
+                Log.i(TAG, "onBecameForeground: 应用切换到前台了");
             }
 
             @Override
             public void onBecameBackground() {
-                Log.i(TAG, "onBecameBackground: ");
+                Log.i(TAG, "onBecameBackground: 应用切换到后台了");
             }
         });
         // 开屏监听
@@ -80,17 +87,17 @@ public class AryaSocket {
             @Override
             public void onScreenOn() {
                 AryaSocket.getInstance().immediateReconnect();
-                Log.i(TAG, "onScreenOn: ");
+                Log.i(TAG, "onScreenOn: 屏幕亮了");
             }
 
             @Override
             public void onScreenOff() {
-                Log.i(TAG, "onScreenOff: ");
+                Log.i(TAG, "onScreenOff: 屏幕关了");
             }
 
             @Override
             public void onUserPresent() {
-                Log.i(TAG, "onUserPresent: ");
+                Log.i(TAG, "onUserPresent: 解锁了");
             }
         });
         // 动态注册网络状态改变的广播接受者
@@ -98,20 +105,28 @@ public class AryaSocket {
         IntentFilter filter = new IntentFilter();
         filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         application.registerReceiver(netWorkReceiver, filter);
-        init();
     }
 
-    private void init() {
+    private void initClient() {
+        if (mAryaConfig == null) {
+            Log.e(TAG, "initClient: " + "请在Application中调用AryaSocket.getInstance().init(),");
+            return;
+        }
+        if (TextUtils.isEmpty(mAryaConfig.getSocketURL())) {
+            Log.e(TAG, "initClient: " + "socket url 不能为空");
+            return;
+        }
         try {
-            ws = new WebSocketFactory().createSocket(url, CONNECT_TIMEOUT)
-                    .setFrameQueueSize(FRAME_QUEUE_SIZE)//设置帧队列最大值为5
+            mWebSocket = new WebSocketFactory().createSocket(mAryaConfig.getSocketURL(), mAryaConfig.getConnectTimeout() > 0 ? mAryaConfig.getConnectTimeout() : CONNECT_TIMEOUT)
+                    .setFrameQueueSize(mAryaConfig.getFrameQueueSize() > 0 ? mAryaConfig.getFrameQueueSize() : FRAME_QUEUE_SIZE)//设置帧队列最大值
                     .setMissingCloseFrameAllowed(false)//设置不允许服务端关闭连接却未发送关闭帧
                     .addListener(new WsListener())//添加回调监听
                     .connectAsynchronously();//异步连接
             mStatus = Status.CONNECTING;
-            Log.i(TAG, "init: 第一次连接");
+            Log.i(TAG, "initClient() 初始化WebSocket");
         } catch (IOException e) {
             e.printStackTrace();
+            Log.e(TAG, "initClient: 初始化WebSocket失败", e);
         }
     }
 
@@ -135,6 +150,7 @@ public class AryaSocket {
                 throws Exception {
             super.onConnected(websocket, headers);
             Log.i(TAG, "onConnected: 连接成功");
+            // 开始发送心跳数据
             mHandler.post(mSendHeart);
             mStatus = Status.CONNECT_SUCCESS;
             cancelReconnect();//连接成功的时候取消重连,初始化连接次数
@@ -147,26 +163,27 @@ public class AryaSocket {
             Log.i(TAG, "onConnectError: 连接错误");
             mHandler.removeCallbacks(mSendHeart);
             mStatus = Status.CONNECT_FAIL;
-            reconnect();//连接错误的时候调用重连方法
+            reconnect(); // 重连
         }
 
         @Override
         public void onDisconnected(WebSocket websocket, WebSocketFrame serverCloseFrame, WebSocketFrame clientCloseFrame, boolean closedByServer)
                 throws Exception {
             super.onDisconnected(websocket, serverCloseFrame, clientCloseFrame, closedByServer);
-            Log.i(TAG, "onDisconnected: 断开连接");
+            Log.i(TAG, "onDisconnected: 连接断开");
             mHandler.removeCallbacks(mSendHeart);
             mStatus = Status.CONNECT_FAIL;
-            reconnect();//连接断开的时候调用重连方法
+            reconnect(); // 重连
         }
     }
 
     private void disposeTextMessage(final String text) {
         if (callBacks != null) {
+            // 发送接受到的数据给所有的观察者
             for (int i = 0; i < callBacks.size(); i++) {
                 final AryaSocketListener receiver = callBacks.get(i);
-                if (receiver != null && handler != null) {
-                    handler.post(new Runnable() {
+                if (receiver != null && mHandler != null) {
+                    mHandler.post(new Runnable() {
                         @Override
                         public void run() {
                             receiver.disposeTextMessage(text);
@@ -177,24 +194,23 @@ public class AryaSocket {
         }
     }
 
-    private void send(String msg) {
-        if (ws != null && ws.isOpen()) {
+    public void send(String msg) {
+        if (mWebSocket != null && mWebSocket.isOpen()) {
             Log.i(TAG, "send: " + msg);
-            ws.sendText(msg);
+            mWebSocket.sendText(msg);
         } else {
-            init();
+            Log.e(TAG, "send: " + "socket客户端为空，或不是open状态");
+            initClient();
         }
     }
 
     public void disconnect() {
-        if (ws != null) {
-            ws.disconnect();
+        if (mWebSocket != null) {
+            mWebSocket.disconnect();
         }
     }
 
-    private Handler mHandler = new Handler();
-
-    private int reconnectCount = 0;//重连次数
+    private int reconnectCount = 0; // 重连次数
 
     // 立刻重连，防止重连次数过多后，再进行连接会等到时间间隔后才重连
     void immediateReconnect() {
@@ -213,7 +229,7 @@ public class AryaSocket {
         }
         // 当前连接断开了
         // 不是正在重连状态
-        if (ws != null && !ws.isOpen() && mStatus != Status.CONNECTING) {
+        if (mWebSocket != null && !mWebSocket.isOpen() && mStatus != Status.CONNECTING) {
 
             reconnectCount++;
             mStatus = Status.CONNECTING;
@@ -225,7 +241,7 @@ public class AryaSocket {
             }
 
             mHandler.postDelayed(mReconnectTask, reconnectTime);
-            Log.i(TAG, "reconnect: " + "准备开始第" + reconnectCount + "次重连,下次" + reconnectTime + "ms后重连 -- webSocketurl:" + url);
+            Log.i(TAG, "reconnect: " + "准备开始第" + reconnectCount + "次重连,下次" + reconnectTime + "ms后重连 -- webSocketurl:" + mAryaConfig.getSocketURL());
         }
     }
 
@@ -234,8 +250,8 @@ public class AryaSocket {
         @Override
         public void run() {
             try {
-                ws = new WebSocketFactory().createSocket(url, CONNECT_TIMEOUT)
-                        .setFrameQueueSize(FRAME_QUEUE_SIZE)//设置帧队列最大值为5
+                mWebSocket = new WebSocketFactory().createSocket(mAryaConfig.getSocketURL(), mAryaConfig.getConnectTimeout() > 0 ? mAryaConfig.getConnectTimeout() : CONNECT_TIMEOUT)
+                        .setFrameQueueSize(mAryaConfig.getFrameQueueSize() > 0 ? mAryaConfig.getFrameQueueSize() : FRAME_QUEUE_SIZE)//设置帧队列最大值为5
                         .setMissingCloseFrameAllowed(false)//设置不允许服务端关闭连接却未发送关闭帧
                         .addListener(new WsListener())//添加回调监听
                         .connectAsynchronously();//异步连接
@@ -244,6 +260,11 @@ public class AryaSocket {
             }
         }
     };
+
+    private void cancelReconnect() {
+        reconnectCount = 0;
+        mHandler.removeCallbacks(mReconnectTask);
+    }
 
     private Runnable mSendHeart = new Runnable() {
         @Override
@@ -254,38 +275,12 @@ public class AryaSocket {
     };
 
     private void sendHeart() {
-//        String oid = BanyarSPUtil.getInstance().getOid();
-//        if (TextUtils.isEmpty(oid)) {
-//            oid = "0";
-//        }
-//
-//        SendHeartParam param = new SendHeartParam();
-//        param.inname = "heartbeat";
-//
-//        SendHeartParam.Data data = new SendHeartParam.Data();
-//        data.uid = BanyarSPUtil.getInstance().getUid();
-//        data.type = "1";
-//        data.city = BanyarSPUtil.getInstance().getCity();
-//        data.sys = Constants.sys;
-//        data.sysver = Constants.sysver;
-//        data.ver = Constants.ver;
-//        data.devid = Constants.devid;
-//        data.platform = Constants.platform;
-//        data.terminal = Constants.terminal;
-//        data.oid = oid;
-//        data.secret = Constants.secret;
-//
-//        param.data = data;
-//
-//        String paramString = new Gson().toJson(param);
-//
-//        send(paramString);
+        if (mAryaConfig == null || TextUtils.isEmpty(mAryaConfig.getHeartData())) {
+            return;
+        }
+        send(mAryaConfig.getHeartData());
     }
 
-    private void cancelReconnect() {
-        reconnectCount = 0;
-        mHandler.removeCallbacks(mReconnectTask);
-    }
 
     private boolean isNetConnect() {
         if (mContext == null || mContext.get() == null) {
@@ -308,8 +303,8 @@ public class AryaSocket {
     private List<AryaSocketListener> callBacks = new ArrayList<>();
 
     public void registerListener(AryaSocketListener receiver) {
-        if (handler == null) {
-            handler = new Handler();
+        if (mHandler == null) {
+            mHandler = new Handler();
         }
         if (callBacks == null) {
             callBacks = new ArrayList<>();

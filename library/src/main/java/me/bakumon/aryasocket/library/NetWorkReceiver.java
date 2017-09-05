@@ -8,12 +8,13 @@ import android.net.NetworkInfo;
 import android.util.Log;
 
 /**
- * 监听网络变化，
- * 网络不可用时关闭socket
- * 网络可用时判断是否是重新链接还是发送心跳，保证持续链接
+ * 监听网络变化
+ * 网络可用时重新链接
  * Created by bakumon on 2017/8/16.
  */
 class NetWorkReceiver extends BroadcastReceiver {
+    private static final String TAG = NetWorkReceiver.class.getName();
+
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent.getAction();
@@ -25,7 +26,7 @@ class NetWorkReceiver extends BroadcastReceiver {
             NetworkInfo info = connectivityManager.getActiveNetworkInfo();
 
             if (info != null && info.isAvailable()) {
-                Log.i("NetWorkReceiver", "onReceive: ");
+                Log.i(TAG, "网络可用");
                 AryaSocket.getInstance().immediateReconnect();
             }
 

@@ -16,15 +16,15 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 class ForegroundCallbacks implements Application.ActivityLifecycleCallbacks {
 
-    public static final long CHECK_DELAY = 600;
-    public static final String TAG = ForegroundCallbacks.class.getName();
+    private static final long CHECK_DELAY = 600;
+    private static final String TAG = ForegroundCallbacks.class.getName();
     private static ForegroundCallbacks instance;
     private boolean foreground = false, paused = true;
     private Handler handler = new Handler();
     private List<Listener> listeners = new CopyOnWriteArrayList<Listener>();
     private Runnable check;
 
-    public static ForegroundCallbacks init(Application application) {
+    static ForegroundCallbacks init(Application application) {
         if (instance == null) {
             instance = new ForegroundCallbacks();
             application.registerActivityLifecycleCallbacks(instance);
