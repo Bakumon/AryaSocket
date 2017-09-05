@@ -234,10 +234,13 @@ public class AryaSocket {
             reconnectCount++;
             mStatus = Status.CONNECTING;
 
+            int perReconnectInterval = mAryaConfig.getPerReconnectInterval() > 0 ? mAryaConfig.getPerReconnectInterval() : PER_RECONNECT_INTERVAL;
+            int maxReconnectInterval = mAryaConfig.getMaxReconnectInterval() > 0 ? mAryaConfig.getMaxReconnectInterval() : MAX_RECONNECT_INTERVAL;
+
             long reconnectTime = 0;
             if (reconnectCount > 1) {
-                long temp = PER_RECONNECT_INTERVAL * (reconnectCount - 1);
-                reconnectTime = temp > MAX_RECONNECT_INTERVAL ? MAX_RECONNECT_INTERVAL : temp;
+                long temp = perReconnectInterval * (reconnectCount - 1);
+                reconnectTime = temp > maxReconnectInterval ? maxReconnectInterval : temp;
             }
 
             mHandler.postDelayed(mReconnectTask, reconnectTime);
